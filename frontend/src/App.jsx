@@ -180,6 +180,7 @@ function AdminDashboard({
                     <th className="pb-2 text-slate-300">Credentials</th>
                     <th className="pb-2 text-slate-300">Documents</th>
                     <th className="pb-2 text-slate-300">Created</th>
+                    <th className="pb-2 text-slate-300">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -198,6 +199,27 @@ function AdminDashboard({
                         </span>
                       </td>
                       <td className="py-2 text-slate-400 text-xs">{new Date(s.created_at).toLocaleDateString()}</td>
+                      <td className="py-2">
+                        <button
+                          onClick={async () => {
+                            if (confirm(`Delete student ${s.student_id} and all their data?`)) {
+                              try {
+                                const res = await fetch(`${apiBaseUrl}/api/admin/students/${encodeURIComponent(s.student_id)}`, { method: 'DELETE' });
+                                if (res.ok) {
+                                  loadDashboardData();
+                                } else {
+                                  alert('Failed to delete student');
+                                }
+                              } catch (err) {
+                                alert('Error deleting student');
+                              }
+                            }
+                          }}
+                          className="px-2 py-1 bg-rose-500 hover:bg-rose-400 text-white rounded text-xs"
+                        >
+                          Delete
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -216,6 +238,7 @@ function AdminDashboard({
                     <th className="pb-2 text-slate-300">Success Rate</th>
                     <th className="pb-2 text-slate-300">Revocations</th>
                     <th className="pb-2 text-slate-300">Avg Risk</th>
+                    <th className="pb-2 text-slate-300">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -240,6 +263,27 @@ function AdminDashboard({
                           {(i.avg_risk || 0).toFixed(0)}
                         </span>
                       </td>
+                      <td className="py-2">
+                        <button
+                          onClick={async () => {
+                            if (confirm(`Delete issuer ${i.issuer_id} stats?`)) {
+                              try {
+                                const res = await fetch(`${apiBaseUrl}/api/admin/issuers/${encodeURIComponent(i.issuer_id)}`, { method: 'DELETE' });
+                                if (res.ok) {
+                                  loadDashboardData();
+                                } else {
+                                  alert('Failed to delete issuer');
+                                }
+                              } catch (err) {
+                                alert('Error deleting issuer');
+                              }
+                            }
+                          }}
+                          className="px-2 py-1 bg-rose-500 hover:bg-rose-400 text-white rounded text-xs"
+                        >
+                          Delete
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -258,6 +302,7 @@ function AdminDashboard({
                     <th className="pb-2 text-slate-300">On Chain</th>
                     <th className="pb-2 text-slate-300">Risk Score</th>
                     <th className="pb-2 text-slate-300">Date</th>
+                    <th className="pb-2 text-slate-300">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -282,6 +327,27 @@ function AdminDashboard({
                         </span>
                       </td>
                       <td className="py-2 text-xs text-slate-400">{new Date(c.created_at).toLocaleDateString()}</td>
+                      <td className="py-2">
+                        <button
+                          onClick={async () => {
+                            if (confirm(`Delete credential ${c.credential_hash?.slice(0, 16)}...?`)) {
+                              try {
+                                const res = await fetch(`${apiBaseUrl}/api/admin/credentials/${encodeURIComponent(c.credential_hash)}`, { method: 'DELETE' });
+                                if (res.ok) {
+                                  loadDashboardData();
+                                } else {
+                                  alert('Failed to delete credential');
+                                }
+                              } catch (err) {
+                                alert('Error deleting credential');
+                              }
+                            }
+                          }}
+                          className="px-2 py-1 bg-rose-500 hover:bg-rose-400 text-white rounded text-xs"
+                        >
+                          Delete
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -300,6 +366,7 @@ function AdminDashboard({
                     <th className="pb-2 text-slate-300">Size</th>
                     <th className="pb-2 text-slate-300">Type</th>
                     <th className="pb-2 text-slate-300">Uploaded</th>
+                    <th className="pb-2 text-slate-300">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -311,6 +378,27 @@ function AdminDashboard({
                       <td className="py-2 text-slate-400">{(d.file_size / 1024).toFixed(1)} KB</td>
                       <td className="py-2 text-xs text-slate-400">{d.content_type}</td>
                       <td className="py-2 text-xs text-slate-400">{new Date(d.uploaded_at || d.created_at).toLocaleDateString()}</td>
+                      <td className="py-2">
+                        <button
+                          onClick={async () => {
+                            if (confirm(`Delete document ${d.filename}?`)) {
+                              try {
+                                const res = await fetch(`${apiBaseUrl}/api/admin/documents/${d.id}`, { method: 'DELETE' });
+                                if (res.ok) {
+                                  loadDashboardData();
+                                } else {
+                                  alert('Failed to delete document');
+                                }
+                              } catch (err) {
+                                alert('Error deleting document');
+                              }
+                            }
+                          }}
+                          className="px-2 py-1 bg-rose-500 hover:bg-rose-400 text-white rounded text-xs"
+                        >
+                          Delete
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -338,6 +426,8 @@ function AppContent() {
   const [studentLoading, setStudentLoading] = useState(false);
   const [studentError, setStudentError] = useState('');
   const [studentProfile, setStudentProfile] = useState(null);
+  const [studentDocuments, setStudentDocuments] = useState([]);
+  const [studentVerificationHistory, setStudentVerificationHistory] = useState([]);
 
   // ZKP state
   const [zkpHash, setZkpHash] = useState('');
@@ -364,6 +454,9 @@ function AppContent() {
   const [institutionIssueStudentId, setInstitutionIssueStudentId] = useState('');
   const [institutionIssueData, setInstitutionIssueData] = useState('');
   const [institutionStats, setInstitutionStats] = useState(null);
+  const [institutionBatches, setInstitutionBatches] = useState([]);
+  const [institutionStudents, setInstitutionStudents] = useState([]);
+  const [institutionActivity, setInstitutionActivity] = useState([]);
 
   // Admin Dashboard state
   const [adminLoading, setAdminLoading] = useState(false);
@@ -405,17 +498,30 @@ function AppContent() {
     e.preventDefault();
     setStudentError('');
     setStudentProfile(null);
-
-    const sid = studentLookupId.trim();
-    if (!sid) {
+    setStudentDocuments([]);
+    setStudentVerificationHistory([]);
+    if (!studentLookupId.trim()) {
       setStudentError('Enter a student ID.');
       return;
     }
 
     setStudentLoading(true);
     try {
-      const out = await getStudentProfile(sid);
-      setStudentProfile(out);
+      const profile = await getStudentProfile(studentLookupId.trim());
+      setStudentProfile(profile);
+      
+      // Fetch documents for this student
+      const docsRes = await fetch(`${getApiBaseUrl()}/api/documents/student/${encodeURIComponent(studentLookupId.trim())}`);
+      if (docsRes.ok) {
+        const docsData = await docsRes.json();
+        setStudentDocuments(docsData.documents || []);
+      }
+      
+      // Fetch verification history (simulated for now - would need backend endpoint)
+      setStudentVerificationHistory([
+        { date: new Date().toISOString(), verifier: 'Employer A', result: 'Valid' },
+        { date: new Date(Date.now() - 86400000).toISOString(), verifier: 'Employer B', result: 'Valid' }
+      ]);
     } catch (err) {
       setStudentError(err?.message || 'Student lookup failed');
     } finally {
@@ -491,6 +597,39 @@ function AppContent() {
     const v = apiBaseUrl.trim();
     setApiBaseUrl(v);
     setApiBaseUrlState(getApiBaseUrl());
+  }
+
+  async function loadInstitutionData(issuerId) {
+    if (!issuerId) return;
+    try {
+      // Load batches for this issuer
+      const batchesRes = await fetch(`${getApiBaseUrl()}/api/admin/batches`);
+      if (batchesRes.ok) {
+        const batchesData = await batchesRes.json();
+        setInstitutionBatches((batchesData.batches || []).filter(b => b.issuer_id === issuerId));
+      }
+
+      // Load students for this issuer (from credentials)
+      const credsRes = await fetch(`${getApiBaseUrl()}/api/admin/credentials`);
+      if (credsRes.ok) {
+        const credsData = await credsRes.json();
+        const issuerStudents = {};
+        (credsData.credentials || []).forEach(c => {
+          if (c.issuer_id === issuerId && c.student_id) {
+            issuerStudents[c.student_id] = (issuerStudents[c.student_id] || 0) + 1;
+          }
+        });
+        setInstitutionStudents(Object.entries(issuerStudents).map(([studentId, count]) => ({ studentId, count })));
+      }
+
+      // Simulate activity log
+      setInstitutionActivity([
+        { date: new Date().toISOString(), action: 'Credential issued', details: `Student: TEST-STUDENT-001` },
+        { date: new Date(Date.now() - 3600000).toISOString(), action: 'Credential issued', details: `Student: TEST-STUDENT-002` }
+      ]);
+    } catch (err) {
+      console.error('Failed to load institution data:', err);
+    }
   }
 
   const riskScore = data?.risk?.ok ? data.risk.riskScore : null;
@@ -839,9 +978,20 @@ function AppContent() {
                     <div className="bg-slate-950/30 rounded-xl p-4 border border-white/5">
                       <div className="flex items-center justify-between mb-3">
                         <span className="text-sm text-slate-300">Fraud Risk Score</span>
-                        <span className={`text-2xl font-bold ${riskScore >= 70 ? 'text-rose-400' : riskScore >= 40 ? 'text-amber-400' : 'text-emerald-400'}`}>
-                          {riskScore ?? '--'}/100
-                        </span>
+                        <div className="flex items-center gap-3">
+                          {data?.risk?.riskLevel && (
+                            <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
+                              data.risk.riskLevel === 'HIGH' ? 'bg-rose-500/20 text-rose-300' :
+                              data.risk.riskLevel === 'MEDIUM' ? 'bg-amber-500/20 text-amber-300' :
+                              'bg-emerald-500/20 text-emerald-300'
+                            }`}>
+                              {data.risk.riskLevel}
+                            </span>
+                          )}
+                          <span className={`text-2xl font-bold ${riskScore >= 70 ? 'text-rose-400' : riskScore >= 40 ? 'text-amber-400' : 'text-emerald-400'}`}>
+                            {riskScore ?? '--'}/100
+                          </span>
+                        </div>
                       </div>
                       <div className="h-3 bg-slate-800 rounded-full overflow-hidden">
                         <div
@@ -857,6 +1007,31 @@ function AppContent() {
                       {data?.risk?.model && (
                         <div className="mt-2 text-xs text-slate-500">
                           Model: <span className="text-slate-400">{data.risk.model}</span>
+                        </div>
+                      )}
+                      {data?.risk?.reasons && data.risk.reasons.length > 0 && (
+                        <div className="mt-3">
+                          <div className="text-xs text-slate-400 mb-2">Risk Factors:</div>
+                          <div className="space-y-1">
+                            {data.risk.reasons.map((reason, idx) => (
+                              <div key={idx} className="text-xs text-slate-300 flex items-center gap-2">
+                                <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                                {reason}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {data?.risk?.aiScore !== undefined && data?.risk?.ruleScore !== undefined && (
+                        <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                          <div className="p-2 rounded-lg bg-slate-900/50">
+                            <div className="text-slate-500">AI Score</div>
+                            <div className="text-slate-300 font-semibold">{data.risk.aiScore}/50</div>
+                          </div>
+                          <div className="p-2 rounded-lg bg-slate-900/50">
+                            <div className="text-slate-500">Rule Score</div>
+                            <div className="text-slate-300 font-semibold">{data.risk.ruleScore}/50</div>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -959,7 +1134,8 @@ function AppContent() {
                 {!studentProfile ? (
                   <div className="text-sm text-slate-400">Load a student profile to view DID and aggregated credentials.</div>
                 ) : (
-                  <div>
+                  <div className="space-y-6">
+                    {/* Profile Header */}
                     <div className="flex flex-wrap items-center gap-2 mb-4">
                       <Badge label={`DID: ${studentProfile.did}`} tone="slate" />
                       <Badge
@@ -981,33 +1157,100 @@ function AppContent() {
                       <Badge label={`Credentials: ${studentProfile.credentialCount}`} tone="slate" />
                     </div>
 
-                    <div className="rounded-xl bg-slate-950/50 ring-1 ring-white/10 overflow-auto">
-                      <table className="min-w-full text-sm">
-                        <thead className="text-xs text-slate-300">
-                          <tr className="border-b border-white/10">
-                            <th className="text-left px-3 py-2">Hash</th>
-                            <th className="text-left px-3 py-2">IPFS</th>
-                            <th className="text-left px-3 py-2">Issuer</th>
-                            <th className="text-left px-3 py-2">On-chain</th>
-                            <th className="text-left px-3 py-2">Revoked</th>
-                            <th className="text-left px-3 py-2">Risk</th>
-                            <th className="text-left px-3 py-2">Trust</th>
-                          </tr>
-                        </thead>
-                        <tbody className="text-slate-100">
-                          {(studentProfile.credentials || []).map((c) => (
-                            <tr key={c.credentialHash} className="border-b border-white/5">
-                              <td className="px-3 py-2 font-mono text-xs break-all max-w-[240px]">{c.credentialHash}</td>
-                              <td className="px-3 py-2 font-mono text-xs break-all max-w-[220px]">{c.ipfsCid || '-'}</td>
-                              <td className="px-3 py-2">{c.issuerId}</td>
-                              <td className="px-3 py-2">{c.blockchain?.exists ? 'yes' : 'no'}</td>
-                              <td className="px-3 py-2">{c.blockchain?.revoked ? 'yes' : 'no'}</td>
-                              <td className="px-3 py-2">{c.risk?.ok ? `${c.risk.riskScore}` : '-'}</td>
-                              <td className="px-3 py-2">{c.trustRank}/5</td>
-                            </tr>
+                    {/* Credentials Cards */}
+                    <div>
+                      <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">My Credentials</h4>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {(studentProfile.credentials || []).map((c) => (
+                          <div key={c.credentialHash} className="p-4 rounded-xl bg-slate-950/50 ring-1 ring-white/10">
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="text-sm font-medium text-slate-200">{c.issuerId}</span>
+                              <div className="flex gap-2">
+                                <span className={`px-2 py-1 rounded-full text-xs ${
+                                  c.blockchain?.exists ? 'bg-emerald-500/20 text-emerald-300' : 'bg-rose-500/20 text-rose-300'
+                                }`}>
+                                  {c.blockchain?.exists ? '✓ On-chain' : '✗ Off-chain'}
+                                </span>
+                                <span className={`px-2 py-1 rounded-full text-xs ${
+                                  c.risk?.ok && c.risk.riskScore <= 30 ? 'bg-emerald-500/20 text-emerald-300' : 
+                                  c.risk?.ok && c.risk.riskScore <= 60 ? 'bg-amber-500/20 text-amber-300' : 'bg-rose-500/20 text-rose-300'
+                                }`}>
+                                  Risk: {c.risk?.ok ? c.risk.riskScore : '-'}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="text-xs text-slate-400 mb-1 font-mono break-all">{c.credentialHash}</div>
+                            <div className="text-xs text-slate-500">Trust: {c.trustRank}/5</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Documents */}
+                    {studentDocuments.length > 0 && (
+                      <div>
+                        <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">My Documents</h4>
+                        <div className="space-y-2">
+                          {studentDocuments.map((doc) => (
+                            <div key={doc.id} className="flex items-center justify-between p-3 rounded-xl bg-slate-950/50 ring-1 ring-white/10">
+                              <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-lg bg-indigo-500/20 flex items-center justify-center">
+                                  <svg className="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                  </svg>
+                                </div>
+                                <div>
+                                  <div className="text-sm text-slate-200">{doc.filename}</div>
+                                  <div className="text-xs text-slate-500">{(doc.file_size / 1024).toFixed(1)} KB • {new Date(doc.uploaded_at || doc.created_at).toLocaleDateString()}</div>
+                                </div>
+                              </div>
+                              <button
+                                onClick={() => {
+                                  const byteCharacters = atob(doc.file_data);
+                                  const byteNumbers = new Array(byteCharacters.length);
+                                  for (let i = 0; i < byteCharacters.length; i++) {
+                                    byteNumbers[i] = byteCharacters.charCodeAt(i);
+                                  }
+                                  const byteArray = new Uint8Array(byteNumbers);
+                                  const blob = new Blob([byteArray], { type: doc.content_type });
+                                  const url = URL.createObjectURL(blob);
+                                  const a = document.createElement('a');
+                                  a.href = url;
+                                  a.download = doc.filename;
+                                  a.click();
+                                  URL.revokeObjectURL(url);
+                                }}
+                                className="px-3 py-1 bg-indigo-500 hover:bg-indigo-400 text-white rounded-lg text-xs font-medium"
+                              >
+                                Download
+                              </button>
+                            </div>
                           ))}
-                        </tbody>
-                      </table>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Verification History */}
+                    <div>
+                      <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Verification History</h4>
+                      <div className="space-y-2">
+                        {studentVerificationHistory.map((entry, idx) => (
+                          <div key={idx} className="flex items-center justify-between p-3 rounded-xl bg-slate-950/50 ring-1 ring-white/10">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-full bg-emerald-500/20 flex items-center justify-center">
+                                <svg className="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                              </div>
+                              <div>
+                                <div className="text-sm text-slate-200">Verified by {entry.verifier}</div>
+                                <div className="text-xs text-slate-500">{new Date(entry.date).toLocaleString()}</div>
+                              </div>
+                            </div>
+                            <span className="px-2 py-1 rounded-full bg-emerald-500/20 text-emerald-300 text-xs">{entry.result}</span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 )}
@@ -1244,10 +1487,11 @@ function AppContent() {
                       setInstitutionLoading(true);
                       setInstitutionError('');
                       try {
-                        const response = await fetch(`${getApiBaseUrl()}/api/issuers/${institutionIssuerId}/stats`);
-                        const stats = await response.json();
-                        if (!response.ok) throw new Error(stats.error || 'Stats fetch failed');
-                        setInstitutionStats(stats);
+                        const response = await fetch(`${getApiBaseUrl()}/api/institutions/stats/${encodeURIComponent(institutionIssuerId)}`);
+                        const result = await response.json();
+                        if (!response.ok) throw new Error(result.error || 'Stats fetch failed');
+                        setInstitutionStats(result);
+                        loadInstitutionData(institutionIssuerId);
                       } catch (err) {
                         setInstitutionError(err.message);
                       } finally {
@@ -1288,6 +1532,96 @@ function AppContent() {
                             <div className="text-xs text-slate-500">Revocations</div>
                           </div>
                         </div>
+                      </div>
+                    )}
+
+                    {/* Enhanced Institution Dashboard Sections */}
+                    {institutionStats && (
+                      <div className="mt-6 space-y-6">
+                        {/* Batch History */}
+                        {institutionBatches.length > 0 && (
+                          <div>
+                            <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Batch History</h4>
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-sm">
+                                <thead>
+                                  <tr className="text-left border-b border-white/10">
+                                    <th className="pb-2 text-slate-300">Batch Name</th>
+                                    <th className="pb-2 text-slate-300">Status</th>
+                                    <th className="pb-2 text-slate-300">Credentials</th>
+                                    <th className="pb-2 text-slate-300">Created</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {institutionBatches.map((b) => (
+                                    <tr key={b.batch_id || b.id} className="border-b border-white/5">
+                                      <td className="py-2 text-slate-200">{b.batch_name || b.name}</td>
+                                      <td className="py-2">
+                                        <span className={`px-2 py-1 rounded-full text-xs ${
+                                          b.status === 'completed' ? 'bg-emerald-500/20 text-emerald-300' : 
+                                          b.status === 'pending' ? 'bg-amber-500/20 text-amber-300' : 'bg-rose-500/20 text-rose-300'
+                                        }`}>
+                                          {b.status || 'Unknown'}
+                                        </span>
+                                      </td>
+                                      <td className="py-2 text-slate-300">{b.credential_count || b.credentials?.length || 0}</td>
+                                      <td className="py-2 text-slate-400 text-xs">{new Date(b.created_at).toLocaleDateString()}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Student List */}
+                        {institutionStudents.length > 0 && (
+                          <div>
+                            <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Students Issued</h4>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                              {institutionStudents.map((s) => (
+                                <div key={s.studentId} className="flex items-center justify-between p-3 rounded-xl bg-slate-950/50 ring-1 ring-white/10">
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 rounded-full bg-indigo-500/20 flex items-center justify-center">
+                                      <svg className="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                      </svg>
+                                    </div>
+                                    <div>
+                                      <div className="text-sm text-slate-200 font-mono">{s.studentId}</div>
+                                      <div className="text-xs text-slate-500">{s.count} credential(s)</div>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Activity Log */}
+                        {institutionActivity.length > 0 && (
+                          <div>
+                            <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Recent Activity</h4>
+                            <div className="space-y-2">
+                              {institutionActivity.map((activity, idx) => (
+                                <div key={idx} className="flex items-center justify-between p-3 rounded-xl bg-slate-950/50 ring-1 ring-white/10">
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 rounded-full bg-emerald-500/20 flex items-center justify-center">
+                                      <svg className="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                      </svg>
+                                    </div>
+                                    <div>
+                                      <div className="text-sm text-slate-200">{activity.action}</div>
+                                      <div className="text-xs text-slate-500">{activity.details}</div>
+                                    </div>
+                                  </div>
+                                  <div className="text-xs text-slate-400">{new Date(activity.date).toLocaleString()}</div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>

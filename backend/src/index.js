@@ -31,7 +31,11 @@ import {
   deleteDocument,
   getAllStudents,
   getAllIssuers,
-  getAllCredentials
+  getAllCredentials,
+  deleteStudent,
+  deleteCredential,
+  deleteDocumentById,
+  deleteIssuer
 } from './database.js';
 
 import {
@@ -669,7 +673,8 @@ app.post('/api/institutions/batches', strictLimiter, async (req, res) => {
       });
     }
 
-    const credentialHashHex = sha256Hex(c.credentialData);
+    // Include studentId and issuerId in hash to make it unique per student
+    const credentialHashHex = sha256Hex(`${c.studentId}:${c.issuerId}:${c.credentialData}`);
     const credentialHashBytes32 = ethers.hexlify(ethers.getBytes('0x' + credentialHashHex));
 
     let txHash = null;
@@ -853,6 +858,7 @@ app.post('/api/students/:studentId/did', authenticateToken, requireStudentAccess
 
 app.get('/api/students/:studentId/profile', async (req, res) => {
   const studentId = req.params.studentId;
+  
   const did = await getOrCreateStudentDid(studentId);
   const aiUrl = process.env.AI_SERVICE_URL || 'http://127.0.0.1:8000';
 
@@ -947,20 +953,59 @@ app.get('/api/students/:studentId/profile', async (req, res) => {
     if (c.riskScore != null && c.riskModel) {
       risk = { ok: true, riskScore: c.riskScore, model: c.riskModel };
     } else {
-      try {
-        const r = await fetch(`${aiUrl}/score`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ studentId, issuerId: c.issuerId, credentialHash: hashHex, batchId: 'individual-credential-batch' })
-        });
-        const body = await r.json();
-        if (r.ok && body?.ok) {
-          risk = { ok: true, riskScore: body.riskScore, model: body.model };
-        } else {
-          risk = { ok: false, error: body?.error || `AI error (${r.status})` };
+      // Use same cache key as verification endpoint
+      const cacheKey = `${studentId}:${c.issuerId}:${hashHex}`;
+      if (riskScoreCache.has(cacheKey)) {
+        risk = riskScoreCache.get(cacheKey);
+      } else {
+        try {
+          // Get issuer trust and stats (same as verification endpoint)
+          const issuerStats = await getOrInitIssuerStats(c.issuerId);
+          const issuerTrustScore = issuerStats ? issuerStats.trustRank || 3 : 3;
+          const credentialCount = issuerStats ? issuerStats.totalIssuedAttempts || 1 : 1;
+          
+          // Get student credential count
+          let studentCredentialCount = 1;
+          if (useDatabase) {
+            const studentResults = await findResultsByStudent(studentId);
+            studentCredentialCount = studentResults.length || 1;
+          }
+          
+          const r = await fetch(`${aiUrl}/score`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ 
+              studentId, 
+              issuerId: c.issuerId, 
+              credentialHash: hashHex, 
+              batchId: 'individual-credential-batch',
+              issuerTrustScore,
+              credentialCount,
+              studentCredentialCount,
+              timeGap: 86400.0,
+              duplicateFlag: 0,
+              batchSize: 1
+            })
+          });
+          const body = await r.json();
+          if (r.ok && body?.ok) {
+            risk = { 
+              ok: true, 
+              riskScore: body.riskScore, 
+              model: body.model,
+              riskLevel: body.riskLevel,
+              reasons: body.reasons,
+              aiScore: body.aiScore,
+              ruleScore: body.ruleScore
+            };
+            // Cache the result
+            riskScoreCache.set(cacheKey, risk);
+          } else {
+            risk = { ok: false, error: body?.error || `AI error (${r.status})` };
+          }
+        } catch (e) {
+          risk = { ok: false, error: String(e?.message || e) };
         }
-      } catch (e) {
-        risk = { ok: false, error: String(e?.message || e) };
       }
     }
 
@@ -1020,6 +1065,21 @@ app.get('/api/verify/by-hash/:hash', optionalAuth, async (req, res) => {
       issuedAt: Number(issuedAt),
       revoked
     };
+    
+    // If credential doesn't exist on blockchain, return early without risk calculation
+    if (!exists) {
+      return res.json({
+        ok: true,
+        credentialHash: h,
+        ipfsCid,
+        blockchain: chain,
+        risk: { ok: false, error: 'Credential not found on blockchain' },
+        trustRank: 0,
+        trustSignals: [],
+        duplicateDetected: false,
+        zkp: { status: 'not_provided' }
+      });
+    }
   } catch (e) {
     return res.status(502).json({ ok: false, error: `Blockchain unavailable: ${String(e?.message || e)}` });
   }
@@ -1097,13 +1157,98 @@ app.get('/api/verify/by-hash/:hash', optionalAuth, async (req, res) => {
     });
   }
 
-  // Calculate risk using built-in heuristic scoring
+  // Calculate risk using AI service with behavioral features
   if (effectiveStudentId && effectiveIssuerId) {
-    risk = calculateRiskScore({
-      studentId: effectiveStudentId,
-      issuerId: effectiveIssuerId,
-      credentialHash: h
-    });
+    // Check cache first
+    const cacheKey = `${effectiveStudentId}:${effectiveIssuerId}:${h}`;
+    if (riskScoreCache.has(cacheKey)) {
+      risk = riskScoreCache.get(cacheKey);
+    } else {
+      try {
+        // Get issuer trust and stats
+        const issuerStats = await getOrInitIssuerStats(effectiveIssuerId);
+        const issuerTrustScore = issuerStats ? issuerStats.trustRank || 3 : 3;
+        const credentialCount = issuerStats ? issuerStats.totalIssuedAttempts || 1 : 1;
+        
+        // Get student credential count
+        let studentCredentialCount = 1;
+        if (useDatabase) {
+          const studentResults = await findResultsByStudent(effectiveStudentId);
+          studentCredentialCount = studentResults.length || 1;
+        }
+        
+        // Calculate time gap (simplified - would need timestamp tracking)
+        const timeGap = 86400.0; // Default to 1 day
+        
+        // Check for duplicate hash
+        const duplicateDetected = await isDuplicateHashInBatches(h);
+        
+        // Check for content duplicate (same credential data issued to different students)
+        let contentDuplicateDetected = false;
+        if (useDatabase) {
+          // Check if this issuer has issued the same credential data to other students
+          const allIssuerResults = await findResultsByIssuer(effectiveIssuerId);
+          // This is a simplified check - in production, you'd store credential data separately
+          // For now, we'll flag if the issuer has many credentials to different students
+          const uniqueStudents = new Set(allIssuerResults.map(r => r.student_id));
+          if (uniqueStudents.size > 5 && credentialCount > uniqueStudents.size) {
+            contentDuplicateDetected = true;
+          }
+        }
+        
+        // Get batch size if available
+        const batchSize = 1; // Default to individual issuance
+        
+        const r = await fetch(`${aiUrl}/score`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ 
+            studentId: effectiveStudentId, 
+            issuerId: effectiveIssuerId, 
+            credentialHash: h,
+            batchId: 'verification-batch',
+            issuerTrustScore,
+            credentialCount,
+            studentCredentialCount,
+            timeGap,
+            duplicateFlag: duplicateDetected || contentDuplicateDetected ? 1 : 0,
+            batchSize
+          })
+        });
+        const body = await r.json();
+        if (r.ok && body?.ok) {
+          risk = { 
+            ok: true, 
+            riskScore: body.riskScore, 
+            model: body.model,
+            riskLevel: body.riskLevel,
+            reasons: body.reasons,
+            aiScore: body.aiScore,
+            ruleScore: body.ruleScore
+          };
+          // Cache the result
+          riskScoreCache.set(cacheKey, risk);
+        } else {
+          // Fallback to heuristic if AI service fails
+          risk = calculateRiskScore({
+            studentId: effectiveStudentId,
+            issuerId: effectiveIssuerId,
+            credentialHash: h
+          });
+          risk.aiError = body?.error || `AI error (${r.status})`;
+          riskScoreCache.set(cacheKey, risk);
+        }
+      } catch (e) {
+        // Fallback to heuristic if AI service is unavailable
+        risk = calculateRiskScore({
+          studentId: effectiveStudentId,
+          issuerId: effectiveIssuerId,
+          credentialHash: h
+        });
+        risk.aiError = String(e?.message || e);
+        riskScoreCache.set(cacheKey, risk);
+      }
+    }
   }
 
   const duplicateDetected = await isDuplicateHashInBatches(h);
@@ -1141,16 +1286,31 @@ const IssueRequest = z.object({
   batchId: z.string().optional()
 });
 
-app.post('/api/credentials/issue', strictLimiter, async (req, res) => {
+app.post('/api/credentials/issue', async (req, res) => {
   const parsed = IssueRequest.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ ok: false, error: parsed.error.flatten() });
   }
 
-  const credentialHashHex = sha256Hex(parsed.data.credentialData);
+  // Include studentId and issuerId in hash to make it unique per student
+  const credentialHashHex = sha256Hex(`${parsed.data.studentId}:${parsed.data.issuerId}:${parsed.data.credentialData}`);
   const credentialHashBytes32 = ethers.hexlify(ethers.getBytes('0x' + credentialHashHex));
 
   try {
+    // Check if credential already exists in database (before blockchain check)
+    if (useDatabase) {
+      const existingResults = await findResultsByHash(credentialHashHex);
+      if (existingResults.length > 0) {
+        return res.status(409).json({
+          ok: false,
+          error: "Credential already exists in database",
+          code: "ALREADY_ISSUED",
+          credentialHash: credentialHashHex,
+          duplicate: true
+        });
+      }
+    }
+    
     // Check if credential already exists on blockchain
     const registry = getRegistry();
     const [exists] = await registry.verify(credentialHashBytes32);
@@ -1167,15 +1327,44 @@ app.post('/api/credentials/issue', strictLimiter, async (req, res) => {
     const tx = await registry.issue(credentialHashBytes32);
     const receipt = await tx.wait();
 
+    const issuedAt = parsed.data.issuedAt || new Date().toISOString();
+
     // Store individual credential for student profile lookup
     individualCredentialStore.set(credentialHashHex, {
       studentId: parsed.data.studentId,
       issuerId: parsed.data.issuerId,
       credentialData: parsed.data.credentialData,
-      issuedAt: parsed.data.issuedAt || new Date().toISOString(),
+      issuedAt,
       txHash: receipt?.hash || tx.hash,
       createdAt: new Date().toISOString()
     });
+
+    // Also save to database for persistence
+    if (useDatabase) {
+      // Create a special batch for individual credentials
+      const individualBatchId = `individual-${parsed.data.studentId}-${Date.now()}`;
+      await createBatch({
+        batchId: individualBatchId,
+        issuerId: parsed.data.issuerId,
+        startedAt: issuedAt,
+        totalCount: 1
+      });
+      await addBatchResult({
+        batchId: individualBatchId,
+        studentId: parsed.data.studentId,
+        issuerId: parsed.data.issuerId,
+        credentialHash: credentialHashHex,
+        txHash: receipt?.hash || tx.hash,
+        chainError: null,
+        ipfsCid: null,
+        ipfsError: null
+      });
+      await completeBatch(individualBatchId, {
+        completedAt: issuedAt,
+        successCount: 1,
+        failureCount: 0
+      });
+    }
 
     return res.json({
       ok: true,
@@ -1486,6 +1675,103 @@ app.get('/api/admin/batches', async (req, res) => {
     return res.status(500).json({ ok: false, error: 'Failed to get batches' });
   }
 });
+app.delete('/api/admin/students/:studentId', async (req, res) => {
+  try {
+    const { studentId } = req.params;
+    
+    // Clear in-memory individual credential store
+    for (const [hash, cred] of individualCredentialStore.entries()) {
+      if (cred.studentId === studentId) {
+        individualCredentialStore.delete(hash);
+      }
+    }
+    
+    if (useDatabase) {
+      const success = await deleteStudent(studentId);
+      if (success) {
+        return res.json({ ok: true });
+      } else {
+        return res.status(500).json({ ok: false, error: 'Failed to delete student' });
+      }
+    } else {
+      // In-memory deletion
+      studentDidStore.delete(studentId);
+      for (const batch of batchStore.values()) {
+        batch.results = batch.results.filter(r => r.studentId !== studentId);
+      }
+      return res.json({ ok: true });
+    }
+  } catch (error) {
+    console.error('Delete student error:', error);
+    return res.status(500).json({ ok: false, error: 'Failed to delete student' });
+  }
+});
+
+// Delete credential
+app.delete('/api/admin/credentials/:credentialHash', async (req, res) => {
+  try {
+    const { credentialHash } = req.params;
+    if (useDatabase) {
+      const success = await deleteCredential(credentialHash);
+      if (success) {
+        return res.json({ ok: true });
+      } else {
+        return res.status(500).json({ ok: false, error: 'Failed to delete credential' });
+      }
+    } else {
+      // In-memory deletion
+      individualCredentialStore.delete(credentialHash);
+      for (const batch of batchStore.values()) {
+        batch.results = batch.results.filter(r => r.credentialHash !== credentialHash);
+      }
+      return res.json({ ok: true });
+    }
+  } catch (error) {
+    console.error('Delete credential error:', error);
+    return res.status(500).json({ ok: false, error: 'Failed to delete credential' });
+  }
+});
+
+// Delete document
+app.delete('/api/admin/documents/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (useDatabase) {
+      const result = await deleteDocumentById(id);
+      if (result) {
+        return res.json({ ok: true });
+      } else {
+        return res.status(500).json({ ok: false, error: 'Failed to delete document' });
+      }
+    } else {
+      return res.status(500).json({ ok: false, error: 'Document deletion not supported in in-memory mode' });
+    }
+  } catch (error) {
+    console.error('Delete document error:', error);
+    return res.status(500).json({ ok: false, error: 'Failed to delete document' });
+  }
+});
+
+// Delete issuer
+app.delete('/api/admin/issuers/:issuerId', async (req, res) => {
+  try {
+    const { issuerId } = req.params;
+    if (useDatabase) {
+      const result = await deleteIssuer(issuerId);
+      if (result) {
+        return res.json({ ok: true });
+      } else {
+        return res.status(500).json({ ok: false, error: 'Failed to delete issuer' });
+      }
+    } else {
+      issuerStats.delete(issuerId);
+      return res.json({ ok: true });
+    }
+  } catch (error) {
+    console.error('Delete issuer error:', error);
+    return res.status(500).json({ ok: false, error: 'Failed to delete issuer' });
+  }
+});
 
 // Get dashboard stats
 app.get('/api/admin/stats', async (req, res) => {
@@ -1594,6 +1880,9 @@ app.post('/api/ipfs/upload', upload.single('file'), async (req, res) => {
 
 // Temporary file storage for uploaded files (before credential is issued)
 const tempFileStore = new Map();
+
+// Risk score cache to ensure same credential always returns same score
+const riskScoreCache = new Map();
 
 const port = Number(process.env.PORT || 5000);
 

@@ -970,5 +970,58 @@ export async function getAllCredentials() {
   }
 }
 
+// Admin Dashboard - Delete student
+export async function deleteStudent(studentId) {
+  try {
+    await pool.query('BEGIN');
+    await pool.query('DELETE FROM documents WHERE student_id = $1', [studentId]);
+    await pool.query('DELETE FROM batch_results WHERE student_id = $1', [studentId]);
+    await pool.query('DELETE FROM student_dids WHERE student_id = $1', [studentId]);
+    await pool.query('COMMIT');
+    return true;
+  } catch (error) {
+    await pool.query('ROLLBACK');
+    console.error('Error deleting student:', error);
+    return false;
+  }
+}
+
+// Admin Dashboard - Delete credential
+export async function deleteCredential(credentialHash) {
+  try {
+    await pool.query('BEGIN');
+    await pool.query('DELETE FROM documents WHERE credential_hash = $1', [credentialHash.toLowerCase()]);
+    await pool.query('DELETE FROM batch_results WHERE credential_hash = $1', [credentialHash.toLowerCase()]);
+    await pool.query('COMMIT');
+    return true;
+  } catch (error) {
+    await pool.query('ROLLBACK');
+    console.error('Error deleting credential:', error);
+    return false;
+  }
+}
+
+// Admin Dashboard - Delete document by ID
+export async function deleteDocumentById(id) {
+  try {
+    const result = await pool.query('DELETE FROM documents WHERE id = $1 RETURNING *', [id]);
+    return result.rows[0] || null;
+  } catch (error) {
+    console.error('Error deleting document:', error);
+    return null;
+  }
+}
+
+// Admin Dashboard - Delete issuer stats
+export async function deleteIssuer(issuerId) {
+  try {
+    const result = await pool.query('DELETE FROM issuer_stats WHERE issuer_id = $1 RETURNING *', [issuerId]);
+    return result.rows[0] || null;
+  } catch (error) {
+    console.error('Error deleting issuer:', error);
+    return null;
+  }
+}
+
 export { pool };
 
